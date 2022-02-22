@@ -2,91 +2,122 @@
 
 # Dependencies - webtorrent, mpv
 
-mkdir -p "$HOME/.cache/notflix"
+# Build cache
+_cache()
+{
+  mkdir -p "$HOME/.cache/notflix"
 
-menu="rofi -dmenu -l 5"
-baseurl="https://1337x.wtf"
-cachedir="$HOME/.cache/notflix"
+  menu="rofi -dmenu -l 5"
+  baseurl="https://1337x.wtf"
+  cachedir="$HOME/.cache/notflix"
+}
 
-if [[ -z "$1" ]]; then
-  query=$(rofi -dmenu -l 0)
-else
-  query="$*"
-fi
+# Query search in "$@"
+_query()
+{
+  #shellcheck disable=2015
+  query=$([ -n "$1" ] && echo "$*" || rofi -dmenu -l 0)
+  query=${query// /+}
 
-query=${query// /+}
+  # Perform query
+  curl -s "$baseurl/search/$query/1/" > "$cachedir/tmp.html"
 
-#curl -s https://1337x.to/category-search/$query/Movies/1/ > $cachedir/tmp.html
-curl -s "$baseurl/search/$query/1/" > "$cachedir/tmp.html"
+  # Get Titles
+  sed -nE 's|<td class.*<a href="/torrent/.*>(.*)</a>.*|\1|p' \
+    "$cachedir/tmp.html" > "$cachedir/titles.bw"
 
-# Get Titles
-grep -o '<a href="/torrent/.*</a>' "$cachedir/tmp.html" |
-  sed 's/<[^>]*>//g' > "$cachedir/titles.bw"
+  # Count results
+  result_count=$(wc -l < "$cachedir/titles.bw")
 
-result_count=$(wc -l "$cachedir/titles.bw" | awk '{print $1}')
-if [ "$result_count" -lt 1 ]; then
-  echo "😔 No Result found. Try again 🔴" -i "NONE"
-  exit 0
-fi
+  # Check results
+  [ "$result_count" -eq 0 ] && notify-send -t 1000 "No Results found." && exit 0
+}
 
-# Seeders and Leechers
-grep -o '<td class="coll-2 seeds.*</td>\|<td class="coll-3 leeches.*</td>' "$cachedir/tmp.html" |
-  sed 's/<[^>]*>//g' | sed 'N;s/\n/ /' > "$cachedir/seedleech.bw"
+# Format query
+_format()
+{
+  # Seeders and Leechers
+  grep -o '<td class="coll-2 seeds.*</td>\|<td class="coll-3 leeches.*</td>' "$cachedir/tmp.html" |
+    sed 's/<[^>]*>//g' | sed 'N;s/\n/ /' > "$cachedir/seedleech.bw"
 
-# Size
-grep -o '<td class="coll-4 size.*</td>' "$cachedir/tmp.html" |
-  sed 's/<span class="seeds">.*<\/span>//g' |
-  sed -e 's/<[^>]*>//g' > "$cachedir/size.bw"
+  # Size
+  grep -o '<td class="coll-4 size.*</td>' "$cachedir/tmp.html" |
+    sed 's/<span class="seeds">.*<\/span>//g' |
+    sed -e 's/<[^>]*>//g' > "$cachedir/size.bw"
 
-# Links
-grep -E '/torrent/' "$cachedir/tmp.html" |
-  sed -E 's#.*(/torrent/.*)/">.*/#\1#' |
-  sed 's/td>//g' > "$cachedir/links.bw"
+  # Links
+  grep -E '/torrent/' "$cachedir/tmp.html" |
+    sed -E 's#.*(/torrent/.*)/">.*/#\1#' |
+    sed 's/td>//g' > "$cachedir/links.bw"
 
-# Clearning up some data to display
-sed 's/\./ /g; s/\-/ /g' "$cachedir/titles.bw" |
-  sed 's/[^A-Za-z0-9 ]//g' | tr -s " " > "$cachedir/tmp" && mv "$cachedir/tmp" "$cachedir/titles.bw"
+  # Clearning up some data to display
+  sed 's/\./ /g; s/\-/ /g' "$cachedir/titles.bw" |
+    sed 's/[^A-Za-z0-9 ]//g' | tr -s " " > "$cachedir/tmp" && mv "$cachedir/tmp" "$cachedir/titles.bw"
 
-awk '{print NR " - ["$0"]"}' "$cachedir/size.bw" > "$cachedir/tmp" && mv "$cachedir/tmp" "$cachedir/size.bw"
-awk '{print "[S:"$1 ", L:"$2"]" }' "$cachedir/seedleech.bw" > "$cachedir/tmp" && mv "$cachedir/tmp" "$cachedir/seedleech.bw"
+  awk '{print NR " - ["$0"]"}' "$cachedir/size.bw" > "$cachedir/tmp" && mv "$cachedir/tmp" "$cachedir/size.bw"
+  awk '{print "[S:"$1 ", L:"$2"]" }' "$cachedir/seedleech.bw" > "$cachedir/tmp" && mv "$cachedir/tmp" "$cachedir/seedleech.bw"
 
-# Getting the line number
-LINE=$(paste -d\   "$cachedir/size.bw" "$cachedir/seedleech.bw" "$cachedir/titles.bw" |
-  $menu |
-  cut -d\- -f1 |
-  awk '{$1=$1; print}')
+  # Getting the line number
+  LINE=$(paste -d\   "$cachedir/size.bw" "$cachedir/seedleech.bw" "$cachedir/titles.bw" |
+    $menu |
+    cut -d\- -f1 |
+    awk '{$1=$1; print}')
 
-[ -z "$LINE" ] && exit 0;
+  [ -z "$LINE" ] && exit 0;
+}
 
-echo "🔍 Searching Magnet seeds 🧲"
+# List formatted files
+_list()
+{
+  notify-send -t 1000 "🔍 Searching Magnet seeds 🧲"
 
-url=$(head -n "$LINE" "$cachedir/links.bw" | tail -n +"$LINE")
+  url=$(head -n "$LINE" "$cachedir/links.bw" | tail -n +"$LINE")
 
-fullURL="${baseurl}${url}/"
+  fullURL="${baseurl}${url}/"
 
-# Requesting page for magnet link
-curl -s "$fullURL" > "$cachedir/tmp.html"
-magnet=$(grep -Po "magnet:\?xt=urn:btih:[a-zA-Z0-9]*" "$cachedir/tmp.html" | head -n 1) 
+  # Requesting page for magnet link
+  curl -s "$fullURL" > "$cachedir/tmp.html"
+  magnet=$(grep -Po "magnet:\?xt=urn:btih:[a-zA-Z0-9]*" "$cachedir/tmp.html" | head -n 1) 
+}
 
-echo "magnet: $magnet"
+_select()
+{
+  declare -a cmd_rofi
 
-declare -a cmd_rofi
+  cmd_rofi+=("rofi")
+  cmd_rofi+=("-dmenu")
+  cmd_rofi+=("-l 10")
+  #shellcheck disable=2016
+  cmd_rofi+=('"-theme-str entry { placeholder: \"Select file to play\"; }"')
 
-cmd_rofi+=("rofi")
-cmd_rofi+=("-theme-str")
-#shellcheck disable=2016
-cmd_rofi+=('"entry { placeholder: \"Select file to play\"; }"')
-cmd_rofi+=("-dmenu -l 10")
+  formats="^[0-9]+.*(mkv|mp4|avi)"
 
-while :; do
-  index=$(webtorrent -o "$cachedir" "$magnet" -s \
-    | grep -E "^[0-9]+.*(mkv|mp4)"               \
-    | eval "${cmd_rofi[*]}"                      \
-    | awk '{print $1}')
+  while :; do
+    if [ -z "$opts" ]; then
+      opts=$(webtorrent -o "$cachedir" "$magnet" -s | grep -E "$formats")
+    fi
 
-  [ -z "$index" ] && break
+    index=$(echo "${opts[*]}" | eval "${cmd_rofi[*]}" | awk '{print $1}')
 
-  webtorrent "$magnet" -s "$index" --mpv
-done
+    [ -z "$index" ] && break
 
-notify-send "Finished $0"
+    webtorrent "$magnet" -s "$index" --mpv
+  done
+}
+
+main()
+{
+  _cache
+
+  _query "$@"
+
+  _format
+
+  _list
+
+  _select
+
+  notify-send -t 1000 "Finished $0"
+}
+
+main "$@"
