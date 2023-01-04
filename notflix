@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Dependencies - webtorrent, mpv
+# Dependencies - webtorrent, vlc
 
 # Build cache
 _cache()
@@ -8,7 +8,7 @@ _cache()
   mkdir -p "$HOME/.cache/notflix"
 
   menu="rofi -dmenu -l 5"
-  baseurl="https://1337x.wtf"
+  baseurl="https://1337x.to"
   cachedir="$HOME/.cache/notflix"
 }
 
@@ -30,7 +30,7 @@ _query()
   result_count=$(wc -l < "$cachedir/titles.bw")
 
   # Check results
-  [ "$result_count" -eq 0 ] && notify-send -t 1000 "No Results found." && exit 0
+  [ "$result_count" -lt 1 ] && notify-send -t 1000 "No Results found." && exit 0
 }
 
 # Format query
@@ -60,7 +60,7 @@ _format()
   # Getting the line number
   LINE=$(paste -d\   "$cachedir/size.bw" "$cachedir/seedleech.bw" "$cachedir/titles.bw" |
     $menu |
-    cut -d\- -f1 |
+    cut -d- -f1 |
     awk '{$1=$1; print}')
 
   [ -z "$LINE" ] && exit 0;
@@ -90,8 +90,12 @@ _select()
   #shellcheck disable=2016
   cmd_rofi+=('"-theme-str entry { placeholder: \"Select file to play\"; }"')
 
-  formats="^[0-9]+.*(mkv|mp4|avi)"
+  formats=".*(mkv|mp4|avi)"
 
+  # Download
+  [[ "$1" -eq 1 ]] && { xdg-open "$magnet"; exit; }
+
+  # Play loop
   while :; do
     if [ -z "$opts" ]; then
       opts=$(webtorrent -o "$cachedir" "$magnet" -s | grep -E "$formats")
@@ -101,12 +105,20 @@ _select()
 
     [ -z "$index" ] && break
 
-    webtorrent "$magnet" -s "$index" --mpv
+    webtorrent "$magnet" -s "$index" --vlc
   done
 }
 
 main()
 {
+  declare -A opts
+
+  for i; do
+    [[ "$i" =~ - ]] && opts["$i"]=1
+  done
+
+  shift "${#opts[*]}"
+
   _cache
 
   _query "$@"
@@ -115,7 +127,7 @@ main()
 
   _list
 
-  _select
+  _select "${opts[-d]}"
 
   notify-send -t 1000 "Finished $0"
 }
