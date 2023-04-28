@@ -98,14 +98,15 @@ _select()
   # Play loop
   while :; do
     if [ -z "$opts" ]; then
-      opts=$(webtorrent -o "$cachedir" "$magnet" -s | grep -E "$formats")
+      opts=$(webtorrent-cli -o "$cachedir" "$magnet" -s | grep -E "$formats")
     fi
 
     index=$(echo "${opts[*]}" | eval "${cmd_rofi[*]}" | awk '{print $1}')
 
     [ -z "$index" ] && break
 
-    webtorrent "$magnet" -s "$index" --vlc
+    # echo "$magnet"
+    webtorrent-cli "$magnet" -s "$index" --vlc
   done
 }
 
